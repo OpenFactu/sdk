@@ -1,149 +1,217 @@
-# @openfactu/sdk
+# @openfactu/plugin-sdk
 
-Cliente REST oficial para integración con **OpenFactu ERP** desde aplicaciones externas.
+SDK oficial para desarrollar **plugins** de [OpenFactu](https://github.com/OpenFactu/OpenFactu).
 
-> **¿Desarrollas plugins?** Este no es tu paquete. Usa [`@openfactu/plugin-sdk`](https://github.com/OpenFactu/plugin-sdk) para acceso a FactuApi, transacciones atómicas y la base de datos directa.
+> **¿Buscas integrar una app externa?** Este paquete es para plugins que corren **dentro del servidor**. Para apps externas usa [`@openfactu/sdk`](https://github.com/OpenFactu/sdk).
 
 ## Diferencia clave
 
 | Paquete | Caso de uso | Transacciones | DB directa |
 |---|---|---|---|
-| `@openfactu/sdk` | Apps externas (React, Node, etc.) | ❌ HTTP REST | ❌ |
 | `@openfactu/plugin-sdk` | Plugins dentro del servidor | ✅ `FactuApi.transaction()` | ✅ Drizzle |
+| `@openfactu/sdk` | Apps externas (React, Node, etc.) | ❌ HTTP REST | ❌ |
 
 ## Instalación
 
 ```bash
-npm install @openfactu/sdk
+npm install @openfactu/plugin-sdk
 ```
 
-## Configuración
+## Inicio rápido
 
-```ts
-import { OpenFactuClient } from '@openfactu/sdk';
+```typescript
+import type { PluginContext, HookContext } from '@openfactu/plugin-sdk';
 
-const client = new OpenFactuClient({
-  baseUrl: 'http://localhost:3000',
-  token: 'eyJhbGci...',
-  tenantId: 'abc-123',
-  timeout: 30000,
+const PLUGIN_ID = 'mi-plugin';
+
+export const init = async ({ hooks, migration, documents, app, factuApi }: PluginContext) => {
+  // Añadir campo a una tabla
+  await migration.addCustomField({
+    pluginId: PLUGIN_ID,
+    tableName: 'BusinessPartner',
+    fieldName: 'loyalty_points',
+    type: 'INTEGER',
+    label: 'Puntos de fidelidad',
+  });
+
+  // Hook antes de crear factura
+  documents.onBeforeCreate('SalesInvoice', async (ctx: HookContext) => {
+    if (ctx.data.total > 10000) {
+      throw new Error('Limite excedido');
+    }
+  });
+
+  // Ruta API personalizada
+  app.get(`/api/plugins/${PLUGIN_ID}/status`, (req, res) => {
+    res.json({ status: 'active' });
+  });
+};
+```
+
+## FactuApi — Crear documentos
+
+```typescript
+export const init = async ({ app, factuApi }: PluginContext) => {
+  app.post('/api/plugins/mi-plugin/factura', async (req, res) => {
+    const result = await factuApi.transaction(
+      req.tenantId,
+      req.tenantClient,
+      req.user,
+      async (tx) => {
+        const invoice = tx.salesInvoice();
+        invoice.partnerId = req.body.partnerId;
+        invoice.addLine({
+          itemId: req.body.itemId,
+          quantity: 2,
+          price: 100,
+          taxGroupId: req.body.taxGroupId,
+        });
+        return tx.save(invoice);
+      }
+    );
+    res.json(result);
+  });
+};
+```
+
+## Transacciones atómicas
+
+```typescript
+await factuApi.transaction(tenantId, db, user, async (tx) => {
+  // Crear albarán
+  const dn = tx.salesDeliveryNote();
+  dn.partnerId = 'bp-001';
+  dn.addLine({ itemId: 'item-001', quantity: 5, price: 50, taxGroupId: 'tg-iva21' });
+  await tx.save(dn);
+
+  // Crear factura referenciando el albarán
+  const inv = tx.salesInvoice();
+  inv.partnerId = 'bp-001';
+  inv.addLine({
+    itemId: 'item-001',
+    quantity: 5,
+    price: 50,
+    taxGroupId: 'tg-iva21',
+    baseType: 'SDN',
+    baseId: dn.id, // ID pre-asignado
+  });
+  await tx.save(inv);
+
+  return { dnId: dn.id, invId: inv.id };
 });
+// Si algo falla, todo se revierte automáticamente
 ```
 
-## Documentos
+## Consultas a maestros
 
-### Crear factura
+```typescript
+const partners = await tx.getPartners();
+const items = await tx.getItems();
+const warehouses = await tx.getWarehouses();
+const series = await tx.getSeries('SINV');
+const openPeriods = await tx.getOpenPeriods();
+```
 
-```ts
-const invoice = await client.documents.create('SINV', {
-  partnerId: '...',
-  seriesId: '...',
-  periodId: '...',
-  lines: [{ itemId: '...', quantity: 2, price: 100, taxGroupId: '...' }],
+## Asientos contables
+
+```typescript
+const je = tx.journalEntry();
+je.date = new Date();
+je.periodId = 'period-001';
+je.description = 'Asiento manual';
+je.addLine({ accountId: '43000001', debit: 1210, partnerId: 'bp-001' });
+je.addLine({ accountId: '70000001', credit: 1000 });
+je.addLine({ accountId: '47700001', credit: 210 });
+
+const { id } = await je.save(db, user.id);
+await tx.postJournalEntry(id);
+```
+
+## RRHH
+
+```typescript
+const employees = await tx.getEmployees();
+const contracts = await tx.getContracts({ employeeId: 'emp-001', activeOnly: true });
+const payrolls = await tx.getPayrolls({ year: 2026, month: 5 });
+```
+
+## Tareas y proyectos
+
+```typescript
+const task = await tx.createTask({
+  title: 'Implementar informe',
+  status: 'todo',
+  priority: 'high',
+  assigneeId: 'emp-001',
 });
+
+const gantt = await tx.getGantt({ from: '2026-05-01', to: '2026-05-31' });
 ```
 
-### Asentar y cancelar
+## Componentes UI
 
-```ts
-await client.documents.post('SINV', invoice.id);
-await client.documents.cancel('SINV', invoice.id);
+Los plugins pueden tener componentes React que se cargan en el ERP. Usa `@openfactu/ui` para los componentes:
+
+```tsx
+import React, { useState } from 'react';
+import { Card, Button, Table } from '@openfactu/ui';
+
+const Page = () => {
+  return (
+    <Card>
+      <h2>Mi Plugin</h2>
+      <Button onClick={() => alert('hola')}>Click</Button>
+    </Card>
+  );
+};
+
+export default Page;
 ```
 
-### Listar y consultar
+## Manifest
 
-```ts
-const invoices = await client.documents.list('SINV');
-const detail = await client.documents.get('SINV', invoice.id);
-```
-
-## Partners
-
-```ts
-const partners = await client.partners.list();
-const partner = await client.partners.create({ name: 'Acme SL' });
-await client.partners.update(partner.id, { email: 'info@acme.com' });
-await client.partners.delete(partner.id);
-```
-
-> **Nota:** `get(id)` realiza un `list()` completo y filtra localmente porque la API no expone `GET /api/partners/:id`.
-
-## Items
-
-```ts
-const items = await client.items.list();
-const item = await client.items.create({ name: 'Laptop', uomId: '...', basePrice: 999 });
-
-// Stock, lotes y UOMs
-const stock = await client.items.getStock(item.id);
-const batches = await client.items.getBatches(item.id);
-const uoms = await client.items.getUoms(item.id);
-```
-
-## Campos custom (`p_*`)
-
-OpenFactu permite campos personalizados en items. Puedes pasarlos directamente:
-
-```ts
-const item = await client.items.create({
-  name: 'Producto',
-  uomId: '...',
-  p_color: 'Rojo',
-  p_size: 'XL',
-});
-```
-
-## Cambiar de token o tenant
-
-```ts
-// Mismo servidor, otro usuario
-const otherUser = client.withToken('otro-jwt');
-
-// Mismo usuario, otra empresa
-const otherTenant = client.withTenant('tenant-456');
-```
-
-## Manejo de errores
-
-```ts
-import { OpenFactuError } from '@openfactu/sdk';
-
-try {
-  await client.documents.create('SINV', { ... });
-} catch (err) {
-  if (err instanceof OpenFactuError) {
-    console.error(err.statusCode, err.message, err.path);
+```json
+{
+  "name": "Mi Plugin",
+  "version": "1.0.0",
+  "description": "Descripcion",
+  "logo": "Puzzle",
+  "ui": {
+    "routes": [
+      {
+        "path": "/plugin/mi-plugin",
+        "title": "Mi Plugin",
+        "type": "custom",
+        "config": { "component": "ui/Page.tsx" }
+      }
+    ],
+    "menuItems": [
+      { "label": "Mi Plugin", "path": "/plugin/mi-plugin", "icon": "Puzzle" }
+    ]
   }
 }
 ```
 
-## Tipos exportados
+## Desarrollo remoto
 
-```ts
-import type {
-  DocType,
-  DocumentCreateParams,
-  DocumentResponse,
-  DocumentListItem,
-  DocumentDetail,
-  Partner,
-  PartnerCreateParams,
-  Item,
-  ItemCreateParams,
-  ItemBatch,
-  ItemStock,
-  ItemUom,
-  ConnectionConfig,
-} from '@openfactu/sdk';
+Sube tu plugin a un servidor OpenFactu sin necesidad de acceso SSH:
+
+```bash
+# Subir una vez
+openfactu plugin push --server http://mi-servidor:3000 --client-id ofk_... --client-secret ofs_...
+
+# Auto-sync al guardar
+openfactu plugin watch --server http://mi-servidor:3000 --client-id ofk_... --client-secret ofs_...
 ```
 
-## Referencia
+Las dev keys se generan desde la UI del ERP: Plugins > Desarrollo > Generar API Key.
 
-| Recurso | Métodos |
-|---|---|
-| `client.documents` | `create`, `post`, `cancel`, `get`, `list` |
-| `client.partners` | `list`, `get`, `create`, `update`, `delete` |
-| `client.items` | `list`, `get`, `create`, `update`, `delete`, `getBatches`, `getStock`, `getUoms`, `addUom`, `removeUom` |
+## Links
+
+- [Documentación](https://openfactuerp.org/plugins/crear-plugin/)
+- [Template](https://github.com/OpenFactu/openfactu-plugin-template)
+- [Marketplace](https://openfactuerp.org/marketplace/)
+- [GitHub](https://github.com/OpenFactu/OpenFactu)
 
 ## Licencia
 
