@@ -66,6 +66,8 @@ await client.partners.update(partner.id, { email: 'info@acme.com' });
 await client.partners.delete(partner.id);
 ```
 
+> **Nota:** `get(id)` realiza un `list()` completo y filtra localmente porque la API no expone `GET /api/partners/:id`.
+
 ## Items
 
 ```ts
@@ -76,6 +78,29 @@ const item = await client.items.create({ name: 'Laptop', uomId: '...', basePrice
 const stock = await client.items.getStock(item.id);
 const batches = await client.items.getBatches(item.id);
 const uoms = await client.items.getUoms(item.id);
+```
+
+## Campos custom (`p_*`)
+
+OpenFactu permite campos personalizados en items. Puedes pasarlos directamente:
+
+```ts
+const item = await client.items.create({
+  name: 'Producto',
+  uomId: '...',
+  p_color: 'Rojo',
+  p_size: 'XL',
+});
+```
+
+## Cambiar de token o tenant
+
+```ts
+// Mismo servidor, otro usuario
+const otherUser = client.withToken('otro-jwt');
+
+// Mismo usuario, otra empresa
+const otherTenant = client.withTenant('tenant-456');
 ```
 
 ## Manejo de errores
@@ -90,6 +115,26 @@ try {
     console.error(err.statusCode, err.message, err.path);
   }
 }
+```
+
+## Tipos exportados
+
+```ts
+import type {
+  DocType,
+  DocumentCreateParams,
+  DocumentResponse,
+  DocumentListItem,
+  DocumentDetail,
+  Partner,
+  PartnerCreateParams,
+  Item,
+  ItemCreateParams,
+  ItemBatch,
+  ItemStock,
+  ItemUom,
+  ConnectionConfig,
+} from '@openfactu/sdk';
 ```
 
 ## Referencia
