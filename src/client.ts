@@ -1,5 +1,7 @@
 import { HttpClient } from './http';
 import { Documents } from './resources/documents';
+import { Partners } from './resources/partners';
+import { Items } from './resources/items';
 import type { ConnectionConfig } from './types';
 
 /**
@@ -37,9 +39,17 @@ export class OpenFactuClient {
   /** Gestión de documentos (facturas, pedidos, albaranes) */
   public readonly documents: Documents;
 
+  /** Gestión de socios de negocio (clientes / proveedores) */
+  public readonly partners: Partners;
+
+  /** Gestión de artículos (maestro de productos) */
+  public readonly items: Items;
+
   constructor(config: ConnectionConfig) {
     this.http = new HttpClient(config);
     this.documents = new Documents(this.http);
+    this.partners = new Partners(this.http);
+    this.items = new Items(this.http);
   }
 
   /**

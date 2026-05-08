@@ -1,5 +1,5 @@
 import { HttpClient } from '../http';
-import type { DocType, DocumentCreateParams, DocumentResponse } from '../types';
+import type { DocType, DocumentCreateParams, DocumentResponse, DocumentListItem, DocumentDetail } from '../types';
 
 /**
  * Resource para crear, asentar y cancelar documentos vía la DI API.
@@ -40,7 +40,7 @@ export class Documents {
   /**
    * Lee un documento por ID (usa el endpoint nativo, no el DI).
    */
-  async get(docType: DocType, id: string): Promise<any> {
+  async get(docType: DocType, id: string): Promise<DocumentDetail> {
     const endpoints: Record<DocType, string> = {
       SINV: `/api/sales/invoices/${id}`,
       PINV: `/api/purchases/invoices/${id}`,
@@ -49,13 +49,13 @@ export class Documents {
       SO: `/api/sales/${id}`,
       PO: `/api/purchases/orders/${id}`,
     };
-    return this.http.get(endpoints[docType]);
+    return this.http.get<DocumentDetail>(endpoints[docType]);
   }
 
   /**
    * Lista documentos del tipo especificado.
    */
-  async list(docType: DocType): Promise<any[]> {
+  async list(docType: DocType): Promise<DocumentListItem[]> {
     const endpoints: Record<DocType, string> = {
       SINV: '/api/sales/invoices',
       PINV: '/api/purchases/invoices',
@@ -64,6 +64,6 @@ export class Documents {
       SO: '/api/sales',
       PO: '/api/purchases/orders',
     };
-    return this.http.get<any[]>(endpoints[docType]);
+    return this.http.get<DocumentListItem[]>(endpoints[docType]);
   }
 }

@@ -1,4 +1,5 @@
 import type { ConnectionConfig, ApiError } from './types';
+import { OpenFactuError } from './errors';
 
 export class HttpClient {
   private baseUrl: string;
@@ -21,77 +22,49 @@ export class HttpClient {
     };
   }
 
-  async get<T>(path: string): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: any,
+  ): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout);
 
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'GET',
-        headers: this.headers(),
-        signal: controller.signal,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as ApiError).error || `HTTP ${res.status}`);
-      return data as T;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async post<T>(path: string, body?: any): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
-
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'POST',
+        method,
         headers: this.headers(),
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
       const data = await res.json();
-      if (!res.ok) throw new Error((data as ApiError).error || `HTTP ${res.status}`);
+      if (!res.ok) {
+        throw new OpenFactuError({
+          message: (data as ApiError).error || `HTTP ${res.status}`,
+          statusCode: res.status,
+          response: data,
+          path,
+        });
+      }
       return data as T;
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async get<T>(path: string): Promise<T> {
+    return this.request<T>('GET', path);
+  }
+
+  async post<T>(path: string, body?: any): Promise<T> {
+    return this.request<T>('POST', path, body);
   }
 
   async patch<T>(path: string, body: any): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
-
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'PATCH',
-        headers: this.headers(),
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as ApiError).error || `HTTP ${res.status}`);
-      return data as T;
-    } finally {
-      clearTimeout(timer);
-    }
+    return this.request<T>('PATCH', path, body);
   }
 
   async delete<T>(path: string): Promise<T> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
-
-    try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
-        method: 'DELETE',
-        headers: this.headers(),
-        signal: controller.signal,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error((data as ApiError).error || `HTTP ${res.status}`);
-      return data as T;
-    } finally {
-      clearTimeout(timer);
-    }
+    return this.request<T>('DELETE', path);
   }
 }
