@@ -18,6 +18,10 @@ export class Documents {
 
   /**
    * Crea un documento del tipo especificado.
+   *
+   * Requiere autenticar con un token de API (`tk_...`) con scope
+   * `write:ventas` (SINV/SO/SDN) o `write:compras` (PINV/PO/PDN). Un JWT de
+   * usuario recibe 401.
    */
   async create(docType: DocType, params: DocumentCreateParams): Promise<DocumentResponse> {
     return this.http.post<DocumentResponse>(`/api/factuapi/documents/${docType}`, params);
@@ -25,6 +29,8 @@ export class Documents {
 
   /**
    * Asienta un borrador (D → O). Sólo para facturas (SINV, PINV).
+   *
+   * Requiere el mismo scope de escritura que `create` para ese tipo.
    */
   async post(docType: DocType, id: string): Promise<{ success: boolean; id: string; status: string }> {
     return this.http.post(`/api/factuapi/documents/${docType}/${id}/post`);
@@ -32,6 +38,8 @@ export class Documents {
 
   /**
    * Cancela un documento.
+   *
+   * Requiere el mismo scope de escritura que `create` para ese tipo.
    */
   async cancel(docType: DocType, id: string): Promise<{ success: boolean }> {
     return this.http.post(`/api/factuapi/documents/${docType}/${id}/cancel`);

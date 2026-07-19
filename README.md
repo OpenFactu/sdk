@@ -1,217 +1,168 @@
-# @openfactu/plugin-sdk
+# @openfactu/sdk
 
-SDK oficial para desarrollar **plugins** de [OpenFactu](https://github.com/OpenFactu/OpenFactu).
+SDK oficial para integrar **aplicaciones externas** (React, Node, workers, integraciones server-to-server) con un ERP [OpenFactu](https://github.com/OpenFactu/OpenFactu) por HTTP REST.
 
-> **¿Buscas integrar una app externa?** Este paquete es para plugins que corren **dentro del servidor**. Para apps externas usa [`@openfactu/sdk`](https://github.com/OpenFactu/sdk).
+> **¿Desarrollas un plugin que corre _dentro_ del servidor?** Este no es tu paquete — usa [`@openfactu/plugin-sdk`](https://github.com/OpenFactu/plugin-sdk), que te da `FactuApi.transaction()` y acceso directo a Drizzle.
 
 ## Diferencia clave
 
-| Paquete | Caso de uso | Transacciones | DB directa |
+| Paquete | Caso de uso | Transporte | Auth |
 |---|---|---|---|
-| `@openfactu/plugin-sdk` | Plugins dentro del servidor | ✅ `FactuApi.transaction()` | ✅ Drizzle |
-| `@openfactu/sdk` | Apps externas (React, Node, etc.) | ❌ HTTP REST | ❌ |
+| `@openfactu/sdk` | Apps externas | HTTP REST | Token de API (`tk_`) |
+| `@openfactu/plugin-sdk` | Plugins en el servidor | En proceso | Contexto del plugin |
 
 ## Instalación
 
 ```bash
-npm install @openfactu/plugin-sdk
+npm install @openfactu/sdk
 ```
+
+## Autenticación
+
+Las operaciones de integración usan un **token de API**, no la contraseña ni el JWT de un usuario. Se genera desde el ERP:
+
+**Configuración → Tokens de API → Crear token.** Elige un nombre y los *scopes* necesarios. El token (`tk_...`) se muestra **una sola vez** — guárdalo; si lo pierdes, revócalo y crea otro.
+
+### Scopes
+
+| Scope | Concede |
+|---|---|
+| `write:ventas` | Crear/asentar/cancelar facturas, pedidos y albaranes de **venta** (SINV/SO/SDN) |
+| `write:compras` | Crear/asentar/cancelar facturas, pedidos y albaranes de **compra** (PINV/PO/PDN) |
+| `read:maestros` | Leer clientes/proveedores y artículos (stock, lotes, unidades) |
+| `write:maestros` | Crear/editar/borrar clientes/proveedores y artículos |
+| `read:logistics` / `write:logistics` | API de logística |
+| `*` | Todos los scopes |
+
+`write:x` implica `read:x`. Un token solo tiene los scopes que marcaste al crearlo: si intentas una operación fuera de su alcance, el servidor responde **403** y el SDK lanza un `OpenFactuError` con `statusCode: 403`.
 
 ## Inicio rápido
 
 ```typescript
-import type { PluginContext, HookContext } from '@openfactu/plugin-sdk';
+import { OpenFactuClient } from '@openfactu/sdk';
 
-const PLUGIN_ID = 'mi-plugin';
-
-export const init = async ({ hooks, migration, documents, app, factuApi }: PluginContext) => {
-  // Añadir campo a una tabla
-  await migration.addCustomField({
-    pluginId: PLUGIN_ID,
-    tableName: 'BusinessPartner',
-    fieldName: 'loyalty_points',
-    type: 'INTEGER',
-    label: 'Puntos de fidelidad',
-  });
-
-  // Hook antes de crear factura
-  documents.onBeforeCreate('SalesInvoice', async (ctx: HookContext) => {
-    if (ctx.data.total > 10000) {
-      throw new Error('Limite excedido');
-    }
-  });
-
-  // Ruta API personalizada
-  app.get(`/api/plugins/${PLUGIN_ID}/status`, (req, res) => {
-    res.json({ status: 'active' });
-  });
-};
-```
-
-## FactuApi — Crear documentos
-
-```typescript
-export const init = async ({ app, factuApi }: PluginContext) => {
-  app.post('/api/plugins/mi-plugin/factura', async (req, res) => {
-    const result = await factuApi.transaction(
-      req.tenantId,
-      req.tenantClient,
-      req.user,
-      async (tx) => {
-        const invoice = tx.salesInvoice();
-        invoice.partnerId = req.body.partnerId;
-        invoice.addLine({
-          itemId: req.body.itemId,
-          quantity: 2,
-          price: 100,
-          taxGroupId: req.body.taxGroupId,
-        });
-        return tx.save(invoice);
-      }
-    );
-    res.json(result);
-  });
-};
-```
-
-## Transacciones atómicas
-
-```typescript
-await factuApi.transaction(tenantId, db, user, async (tx) => {
-  // Crear albarán
-  const dn = tx.salesDeliveryNote();
-  dn.partnerId = 'bp-001';
-  dn.addLine({ itemId: 'item-001', quantity: 5, price: 50, taxGroupId: 'tg-iva21' });
-  await tx.save(dn);
-
-  // Crear factura referenciando el albarán
-  const inv = tx.salesInvoice();
-  inv.partnerId = 'bp-001';
-  inv.addLine({
-    itemId: 'item-001',
-    quantity: 5,
-    price: 50,
-    taxGroupId: 'tg-iva21',
-    baseType: 'SDN',
-    baseId: dn.id, // ID pre-asignado
-  });
-  await tx.save(inv);
-
-  return { dnId: dn.id, invId: inv.id };
-});
-// Si algo falla, todo se revierte automáticamente
-```
-
-## Consultas a maestros
-
-```typescript
-const partners = await tx.getPartners();
-const items = await tx.getItems();
-const warehouses = await tx.getWarehouses();
-const series = await tx.getSeries('SINV');
-const openPeriods = await tx.getOpenPeriods();
-```
-
-## Asientos contables
-
-```typescript
-const je = tx.journalEntry();
-je.date = new Date();
-je.periodId = 'period-001';
-je.description = 'Asiento manual';
-je.addLine({ accountId: '43000001', debit: 1210, partnerId: 'bp-001' });
-je.addLine({ accountId: '70000001', credit: 1000 });
-je.addLine({ accountId: '47700001', credit: 210 });
-
-const { id } = await je.save(db, user.id);
-await tx.postJournalEntry(id);
-```
-
-## RRHH
-
-```typescript
-const employees = await tx.getEmployees();
-const contracts = await tx.getContracts({ employeeId: 'emp-001', activeOnly: true });
-const payrolls = await tx.getPayrolls({ year: 2026, month: 5 });
-```
-
-## Tareas y proyectos
-
-```typescript
-const task = await tx.createTask({
-  title: 'Implementar informe',
-  status: 'todo',
-  priority: 'high',
-  assigneeId: 'emp-001',
+const client = new OpenFactuClient({
+  baseUrl: 'https://mi-erp.example.com',
+  token: 'tk_...',        // token de API (Configuración → Tokens de API)
+  tenantId: 'abc-123',    // id de la empresa
 });
 
-const gantt = await tx.getGantt({ from: '2026-05-01', to: '2026-05-31' });
+// Crear una factura de venta en borrador (requiere scope write:ventas)
+const invoice = await client.documents.create('SINV', {
+  partnerId: 'partner-1',
+  seriesId: 'series-1',
+  periodId: 'period-1',
+  lines: [
+    { itemId: 'item-1', quantity: 2, price: 50, taxGroupId: 'tg-iva21' },
+  ],
+  customFields: { p_shipping_notes: 'Frágil' },
+});
+
+// Asentar el borrador (D → O)
+await client.documents.post('SINV', invoice.id);
 ```
 
-## Componentes UI
+## Documentos
 
-Los plugins pueden tener componentes React que se cargan en el ERP. Usa `@openfactu/ui` para los componentes:
+```typescript
+// Crear (SINV, PINV, SO, PO, SDN, PDN)
+const doc = await client.documents.create('SO', { partnerId, seriesId, periodId, lines });
 
-```tsx
-import React, { useState } from 'react';
-import { Card, Button, Table } from '@openfactu/ui';
+// Asentar borrador — solo facturas
+await client.documents.post('SINV', doc.id);
 
-const Page = () => {
-  return (
-    <Card>
-      <h2>Mi Plugin</h2>
-      <Button onClick={() => alert('hola')}>Click</Button>
-    </Card>
-  );
-};
+// Cancelar
+await client.documents.cancel('SINV', doc.id);
 
-export default Page;
+// Leer / listar (endpoints nativos)
+const detail = await client.documents.get('SINV', doc.id);
+const all = await client.documents.list('SINV');
 ```
 
-## Manifest
+`documents.create/post/cancel` requieren `write:ventas` (SINV/SO/SDN) o `write:compras` (PINV/PO/PDN).
 
-```json
-{
-  "name": "Mi Plugin",
-  "version": "1.0.0",
-  "description": "Descripcion",
-  "logo": "Puzzle",
-  "ui": {
-    "routes": [
-      {
-        "path": "/plugin/mi-plugin",
-        "title": "Mi Plugin",
-        "type": "custom",
-        "config": { "component": "ui/Page.tsx" }
-      }
-    ],
-    "menuItems": [
-      { "label": "Mi Plugin", "path": "/plugin/mi-plugin", "icon": "Puzzle" }
-    ]
+## Clientes y proveedores
+
+```typescript
+const partners = await client.partners.list();            // read:maestros
+const partner = await client.partners.get('partner-1');   // read:maestros
+
+const nuevo = await client.partners.create({              // write:maestros
+  name: 'ACME S.L.',
+  nif: 'B12345678',
+  email: 'compras@acme.example',
+});
+
+await client.partners.update(nuevo.id, { phone: '+34600000000' });
+await client.partners.delete(nuevo.id);
+```
+
+## Artículos
+
+```typescript
+const items = await client.items.list();                  // read:maestros
+const stock = await client.items.getStock('item-1');      // read:maestros
+const batches = await client.items.getBatches('item-1');  // read:maestros
+
+const art = await client.items.create({                   // write:maestros
+  name: 'Tornillo M6',
+  uomId: 'uom-ud',
+  basePrice: 0.12,
+  manageBy: 'N',
+});
+
+// Unidades de medida alternativas
+await client.items.addUom(art.id, { uomId: 'uom-caja', factor: 100 });
+```
+
+Los campos personalizados (`p_*`) se pasan y se leen como propiedades normales del objeto.
+
+## Manejo de errores
+
+Toda respuesta no-2xx lanza un `OpenFactuError`:
+
+```typescript
+import { OpenFactuError } from '@openfactu/sdk';
+
+try {
+  await client.documents.create('SINV', params);
+} catch (err) {
+  if (err instanceof OpenFactuError) {
+    console.error(err.statusCode); // 400, 401, 403, 404, 500...
+    console.error(err.message);    // mensaje del servidor
+    console.error(err.path);       // endpoint que falló
+    console.error(err.response);   // body crudo
   }
 }
 ```
 
-## Desarrollo remoto
+- **401** — falta el token o no es válido/está revocado.
+- **403** — el token no tiene el scope requerido.
 
-Sube tu plugin a un servidor OpenFactu sin necesidad de acceso SSH:
+## Cambiar de empresa o token
 
-```bash
-# Subir una vez
-openfactu plugin push --server http://mi-servidor:3000 --client-id ofk_... --client-secret ofs_...
+Ambos métodos devuelven un cliente nuevo (inmutable):
 
-# Auto-sync al guardar
-openfactu plugin watch --server http://mi-servidor:3000 --client-id ofk_... --client-secret ofs_...
+```typescript
+const otraEmpresa = client.withTenant('otro-tenant-id');
+const otroToken = client.withToken('tk_otro...');
 ```
 
-Las dev keys se generan desde la UI del ERP: Plugins > Desarrollo > Generar API Key.
+## Configuración
+
+```typescript
+new OpenFactuClient({
+  baseUrl: string;    // URL del servidor
+  token: string;      // token de API tk_ (recomendado) o JWT de usuario
+  tenantId: string;   // id de la empresa
+  timeout?: number;   // ms, default 30000
+});
+```
 
 ## Links
 
-- [Documentación](https://openfactuerp.org/plugins/crear-plugin/)
-- [Template](https://github.com/OpenFactu/openfactu-plugin-template)
-- [Marketplace](https://openfactuerp.org/marketplace/)
-- [GitHub](https://github.com/OpenFactu/OpenFactu)
+- [OpenFactu](https://github.com/OpenFactu/OpenFactu)
+- [plugin-sdk](https://github.com/OpenFactu/plugin-sdk) — para plugins internos
 
 ## Licencia
 

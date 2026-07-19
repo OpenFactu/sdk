@@ -4,6 +4,10 @@ import type { Item, ItemCreateParams, ItemUpdateParams, ItemBatch, ItemStock, It
 /**
  * Resource para gestionar artículos (maestro de productos).
  *
+ * Scopes (si autenticas con token de API `tk_`): lecturas (list/get, stock,
+ * lotes, unidades) requieren `read:maestros`; crear/editar/borrar y gestionar
+ * unidades requieren `write:maestros`.
+ *
  * Nota: la API no expone un endpoint GET individual. El método `get(id)`
  * realiza un `list()` y filtra por ID localmente.
  */

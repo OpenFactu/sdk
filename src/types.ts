@@ -3,7 +3,24 @@ export type DocType = 'SINV' | 'PINV' | 'SO' | 'PO' | 'SDN' | 'PDN';
 export interface ConnectionConfig {
   /** URL base del servidor OpenFactu (ej. 'http://localhost:3000') */
   baseUrl: string;
-  /** Token JWT de autenticación */
+  /**
+   * Credencial enviada como `Authorization: Bearer <token>`. Acepta:
+   *
+   *  - Un **token de API** (`tk_...`) generado en el ERP (Configuración →
+   *    Tokens de API). Es **obligatorio** para operar sobre documentos
+   *    (`documents.create/post/cancel`), que exigen el scope `write:ventas`
+   *    (SINV/SO/SDN) o `write:compras` (PINV/PO/PDN). Un JWT de usuario será
+   *    rechazado con 401 en esos endpoints.
+   *  - Un JWT de sesión de usuario, válido para lecturas (`documents.get/list`)
+   *    y para los recursos `partners`/`items`.
+   *
+   * Scopes de los recursos con token `tk_`:
+   *  - `partners.*` / `items.*`: `read:maestros` (lecturas), `write:maestros`
+   *    (crear/editar/borrar).
+   *  - `documents.create/post/cancel`: `write:ventas` o `write:compras`.
+   *
+   * Para una integración externa, lo normal es usar siempre un token `tk_`.
+   */
   token: string;
   /** ID del tenant (empresa) */
   tenantId: string;

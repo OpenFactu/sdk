@@ -4,6 +4,9 @@ import type { Partner, PartnerCreateParams, PartnerUpdateParams } from '../types
 /**
  * Resource para gestionar socios de negocio (clientes y proveedores).
  *
+ * Scopes (si autenticas con token de API `tk_`): lecturas requieren
+ * `read:maestros`; crear/editar/borrar requieren `write:maestros`.
+ *
  * Nota: la API no expone un endpoint GET individual. El método `get(id)`
  * realiza un `list()` y filtra por ID localmente.
  */

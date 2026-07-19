@@ -13,11 +13,12 @@ import type { ConnectionConfig } from './types';
  *
  * const client = new OpenFactuClient({
  *   baseUrl: 'http://localhost:3000',
- *   token: 'eyJhbGci...',
+ *   // Token de API (Configuración → Tokens de API) con scope write:ventas.
+ *   token: 'tk_...',
  *   tenantId: 'abc-123',
  * });
  *
- * // Crear una factura de venta
+ * // Crear una factura de venta (requiere scope write:ventas)
  * const invoice = await client.documents.create('SINV', {
  *   partnerId: '...',
  *   seriesId: '...',
